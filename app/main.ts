@@ -8,6 +8,8 @@ const rl = createInterface({
 
 rl.prompt();
 
+const BUILTINS = new Set(["echo", "exit", "type"]);
+
 rl.on("line", (input: string) => {
   const trimmed = input.trim();
   if (!trimmed) {
@@ -23,6 +25,17 @@ rl.on("line", (input: string) => {
 
   if (command === "echo") {
     console.log(args.join(" "));
+    rl.prompt();
+    return;
+  }
+
+  if (command === "type") {
+    const target = args[0];
+    if (target && BUILTINS.has(target)) {
+      console.log(`${target} is a shell builtin`);
+    } else if (target) {
+      console.log(`${target}: not found`);
+    }
     rl.prompt();
     return;
   }
