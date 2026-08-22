@@ -36,9 +36,15 @@ function findExecutableCompletions(word: string): string[] {
   return [...names].sort();
 }
 
+// Tracks the last word a <TAB> was pressed for, to distinguish the first
+// tab (bell only) from subsequent tabs (list all matches).
+let lastTabWord: string | null = null;
+
 // Tab completion: complete builtin commands and PATH executables, adding a
-// trailing space so the user can immediately type arguments. When nothing
-// matches, leave the input unchanged and ring the terminal bell.
+// trailing space so the user can immediately type arguments. With no match,
+// leave the input unchanged and ring the terminal bell. With multiple
+// matches, ring the bell on the first tab and list them alphabetically on
+// the next tab.
 function completer(line: string): [string[], string] {
   // Node passes the whole line; only the last word gets completed.
   const words = line.split(/\s+/);
@@ -49,12 +55,30 @@ function completer(line: string): [string[], string] {
       ...findExecutableCompletions(word),
     ]),
   ].sort();
+
   if (hits.length === 0) {
+    lastTabWord = null;
     process.stdout.write("\x07"); // bell: no valid completions
     return [[], line];
   }
-  // Single match: complete it with a trailing space.
-  return [hits.length === 1 ? [`${hits[0]} `] : hits, word];
+
+  if (hits.length === 1) {
+    lastTabWord = null;
+    // Single match: complete it with a trailing space.
+    return [`${hits[0]} `, word];
+  }
+
+  // Multiple matches: bell on first tab, list on the next tab.
+  if (lastTabWord !== word) {
+    lastTabWord = word;
+    process.stdout.write("\x07");
+    return [[], line];
+  }
+  lastTabWord = null;
+  process.stdout.write(`\n${hits.join("  ")}\n`);
+  // Redraw the prompt; readline restores the user's input on refresh.
+  rl.prompt(true);
+  return [[], line];
 }
 
 const rl = createInterface({
