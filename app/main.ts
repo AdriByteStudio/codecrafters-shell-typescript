@@ -48,12 +48,15 @@ rl.on("line", (input: string) => {
   }
 
   if (command === "cd") {
-    const target = args[0];
+    let target = args[0];
+    if (target === "~") {
+      target = process.env.HOME;
+    }
     if (target) {
       try {
         process.chdir(target);
       } catch {
-        console.log(`cd: ${target}: No such file or directory`);
+        console.log(`cd: ${args[0]}: No such file or directory`);
       }
     }
     rl.prompt();
