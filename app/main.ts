@@ -1,16 +1,54 @@
 import { createInterface } from "readline";
-import { accessSync, closeSync, constants, openSync, writeSync } from "fs";
+import {
+  accessSync,
+  closeSync,
+  constants,
+  openSync,
+  readdirSync,
+  writeSync,
+} from "fs";
 import path from "path";
 import { spawnSync } from "child_process";
 
-// Tab completion: complete builtin commands, adding a trailing space so
-// the user can immediately type arguments. When nothing matches, leave the
-// input unchanged and ring the terminal bell.
+// Collect executable file names in PATH directories that start with `word`.
+// Missing/unreadable directories are skipped gracefully.
+function findExecutableCompletions(word: string): string[] {
+  const names = new Set<string>();
+  const dirs = process.env.PATH ? process.env.PATH.split(path.delimiter) : [];
+  for (const dir of dirs) {
+    if (!dir) continue;
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const name of entries) {
+      if (!name.startsWith(word) || names.has(name)) continue;
+      try {
+        accessSync(path.join(dir, name), constants.F_OK | constants.X_OK);
+        names.add(name);
+      } catch {
+        // Not a file we can execute; skip.
+      }
+    }
+  }
+  return [...names].sort();
+}
+
+// Tab completion: complete builtin commands and PATH executables, adding a
+// trailing space so the user can immediately type arguments. When nothing
+// matches, leave the input unchanged and ring the terminal bell.
 function completer(line: string): [string[], string] {
   // Node passes the whole line; only the last word gets completed.
   const words = line.split(/\s+/);
   const word = words[words.length - 1] ?? "";
-  const hits = [...BUILTINS].filter((c) => c.startsWith(word)).sort();
+  const hits = [
+    ...new Set([
+      ...[...BUILTINS].filter((c) => c.startsWith(word)),
+      ...findExecutableCompletions(word),
+    ]),
+  ].sort();
   if (hits.length === 0) {
     process.stdout.write("\x07"); // bell: no valid completions
     return [[], line];
