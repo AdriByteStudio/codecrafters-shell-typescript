@@ -11,7 +11,7 @@ const rl = createInterface({
 
 rl.prompt();
 
-const BUILTINS = new Set(["echo", "exit", "type", "pwd"]);
+const BUILTINS = new Set(["echo", "exit", "type", "pwd", "cd"]);
 
 function findExecutableInPath(command: string): string | null {
   const dirs = process.env.PATH ? process.env.PATH.split(path.delimiter) : [];
@@ -43,6 +43,19 @@ rl.on("line", (input: string) => {
 
   if (command === "echo") {
     console.log(args.join(" "));
+    rl.prompt();
+    return;
+  }
+
+  if (command === "cd") {
+    const target = args[0];
+    if (target) {
+      try {
+        process.chdir(target);
+      } catch {
+        console.log(`cd: ${target}: No such file or directory`);
+      }
+    }
     rl.prompt();
     return;
   }
