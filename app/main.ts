@@ -1,4 +1,6 @@
 import { createInterface } from "readline";
+import { accessSync, constants } from "fs";
+import path from "path";
 
 const rl = createInterface({
   input: process.stdin,
@@ -9,6 +11,21 @@ const rl = createInterface({
 rl.prompt();
 
 const BUILTINS = new Set(["echo", "exit", "type"]);
+
+function findExecutableInPath(command: string): string | null {
+  const dirs = process.env.PATH ? process.env.PATH.split(path.delimiter) : [];
+  for (const dir of dirs) {
+    if (!dir) continue;
+    const fullPath = path.join(dir, command);
+    try {
+      accessSync(fullPath, constants.F_OK | constants.X_OK);
+      return fullPath;
+    } catch {
+      // File doesn't exist or isn't executable; keep searching.
+    }
+  }
+  return null;
+}
 
 rl.on("line", (input: string) => {
   const trimmed = input.trim();
@@ -34,7 +51,12 @@ rl.on("line", (input: string) => {
     if (target && BUILTINS.has(target)) {
       console.log(`${target} is a shell builtin`);
     } else if (target) {
-      console.log(`${target}: not found`);
+      const fullPath = findExecutableInPath(target);
+      if (fullPath) {
+        console.log(`${target} is ${fullPath}`);
+      } else {
+        console.log(`${target}: not found`);
+      }
     }
     rl.prompt();
     return;
