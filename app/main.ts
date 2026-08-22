@@ -1,6 +1,7 @@
 import { createInterface } from "readline";
 import { accessSync, constants } from "fs";
 import path from "path";
+import { spawnSync } from "child_process";
 
 const rl = createInterface({
   input: process.stdin,
@@ -58,6 +59,15 @@ rl.on("line", (input: string) => {
         console.log(`${target}: not found`);
       }
     }
+    rl.prompt();
+    return;
+  }
+
+  const fullPath = findExecutableInPath(command);
+  if (fullPath) {
+    // Match real shells: exec the resolved path but keep argv[0] as the
+    // command name the user typed.
+    spawnSync(fullPath, args, { stdio: "inherit", argv0: command });
     rl.prompt();
     return;
   }
