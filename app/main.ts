@@ -51,8 +51,19 @@ function tokenize(input: string): string[] {
       inToken = true;
       i++;
       while (i < input.length && input[i] !== '"') {
-        current += input[i];
-        i++;
+        // Inside double quotes, a backslash only escapes " and \;
+        // any other \x sequence keeps both characters literally.
+        if (
+          input[i] === "\\" &&
+          i + 1 < input.length &&
+          (input[i + 1] === '"' || input[i + 1] === "\\")
+        ) {
+          current += input[i + 1];
+          i += 2;
+        } else {
+          current += input[i];
+          i++;
+        }
       }
       i++; // skip the closing quote
     } else if (char === "\\") {
