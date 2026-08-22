@@ -28,13 +28,49 @@ function findExecutableInPath(command: string): string | null {
   return null;
 }
 
+// Tokenize a command line: split on unquoted whitespace, treat characters
+// inside single quotes literally, and concatenate adjacent quoted/unquoted
+// segments into a single argument.
+function tokenize(input: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let inToken = false;
+  let i = 0;
+
+  while (i < input.length) {
+    const char = input[i];
+    if (char === "'") {
+      inToken = true;
+      i++;
+      while (i < input.length && input[i] !== "'") {
+        current += input[i];
+        i++;
+      }
+      i++; // skip the closing quote
+    } else if (char === " " || char === "\t") {
+      if (inToken) {
+        tokens.push(current);
+        current = "";
+        inToken = false;
+      }
+      i++;
+    } else {
+      inToken = true;
+      current += char;
+      i++;
+    }
+  }
+  if (inToken) tokens.push(current);
+  return tokens;
+}
+
 rl.on("line", (input: string) => {
-  const trimmed = input.trim();
-  if (!trimmed) {
+  const tokens = tokenize(input.trim());
+  if (tokens.length === 0) {
     rl.prompt();
     return;
   }
-  const [command, ...args] = trimmed.split(/\s+/);
+  const [command, ...args] = tokens;
 
   if (command === "exit") {
     rl.close();
