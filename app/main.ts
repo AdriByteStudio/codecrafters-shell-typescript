@@ -56,19 +56,23 @@ function completer(line: string): [string[], string] {
     ]),
   ].sort();
 
+  // Always report "no completions" to readline and perform the desired
+  // effect ourselves; bun's built-in completion insertion is unreliable.
+  if (hits.length === 1) {
+    lastTabWord = null;
+    // Complete in place with a trailing space, as if the user typed it.
+    rl.write(`${hits[0].slice(word.length)} `);
+    return [[], line];
+  }
+
   if (hits.length === 0) {
     lastTabWord = null;
     process.stdout.write("\x07"); // bell: no valid completions
     return [[], line];
   }
 
-  if (hits.length === 1) {
-    lastTabWord = null;
-    // Single match: complete it with a trailing space.
-    return [`${hits[0]} `, word];
-  }
-
-  // Multiple matches: bell on first tab, list on the next tab.
+  // Multiple matches: bell on first tab, list them alphabetically on the
+  // next tab, then redraw the prompt with the user's input preserved.
   if (lastTabWord !== word) {
     lastTabWord = word;
     process.stdout.write("\x07");
@@ -76,7 +80,6 @@ function completer(line: string): [string[], string] {
   }
   lastTabWord = null;
   process.stdout.write(`\n${hits.join("  ")}\n`);
-  // Redraw the prompt; readline restores the user's input on refresh.
   rl.prompt(true);
   return [[], line];
 }
