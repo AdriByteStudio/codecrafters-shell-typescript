@@ -1,5 +1,5 @@
 import { createInterface } from "readline";
-import { accessSync, constants } from "fs";
+import { accessSync, closeSync, constants, openSync, writeSync } from "fs";
 import path from "path";
 import { spawnSync } from "child_process";
 
@@ -74,6 +74,21 @@ function tokenize(input: string): string[] {
         current += input[i];
         i++;
       }
+    } else if (char === ">") {
+      // Unquoted > is a redirection operator. A lone "1" immediately
+      // before it is the explicit stdout fd notation "1>".
+      if (current === "1") {
+        current = "";
+        tokens.push("1>");
+      } else {
+        if (inToken) {
+          tokens.push(current);
+          current = "";
+        }
+        tokens.push(">");
+      }
+      inToken = false;
+      i++;
     } else if (char === " " || char === "\t") {
       if (inToken) {
         tokens.push(current);
@@ -104,8 +119,41 @@ rl.on("line", (input: string) => {
     return;
   }
 
+  // Extract stdout redirection: "> file" or "1> file".
+  let redirectPath: string | null = null;
+  const cmdArgs: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if ((args[i] === ">" || args[i] === "1>") && i + 1 < args.length) {
+      redirectPath = args[i + 1];
+      i++;
+    } else {
+      cmdArgs.push(args[i]);
+    }
+  }
+
+  let redirectFd: number | null = null;
+  if (redirectPath) {
+    try {
+      redirectFd = openSync(redirectPath, "w");
+    } catch {
+      console.log(`cd: ${redirectPath}: No such file or directory`);
+      rl.prompt();
+      return;
+    }
+  }
+
+  // Route stdout lines to the redirected file when one is set.
+  const out = (text: string): void => {
+    if (redirectFd !== null) {
+      writeSync(redirectFd, `${text}\n`);
+    } else {
+      console.log(text);
+    }
+  };
+
   if (command === "echo") {
-    console.log(args.join(" "));
+    out(cmdArgs.join(" "));
+    if (redirectFd !== null) closeSync(redirectFd);
     rl.prompt();
     return;
   }
@@ -127,23 +175,25 @@ rl.on("line", (input: string) => {
   }
 
   if (command === "pwd") {
-    console.log(process.cwd());
+    out(process.cwd());
+    if (redirectFd !== null) closeSync(redirectFd);
     rl.prompt();
     return;
   }
 
   if (command === "type") {
-    const target = args[0];
+    const target = cmdArgs[0];
     if (target && BUILTINS.has(target)) {
-      console.log(`${target} is a shell builtin`);
+      out(`${target} is a shell builtin`);
     } else if (target) {
       const fullPath = findExecutableInPath(target);
       if (fullPath) {
-        console.log(`${target} is ${fullPath}`);
+        out(`${target} is ${fullPath}`);
       } else {
-        console.log(`${target}: not found`);
+        out(`${target}: not found`);
       }
     }
+    if (redirectFd !== null) closeSync(redirectFd);
     rl.prompt();
     return;
   }
@@ -152,7 +202,12 @@ rl.on("line", (input: string) => {
   if (fullPath) {
     // Match real shells: exec the resolved path but keep argv[0] as the
     // command name the user typed.
-    spawnSync(fullPath, args, { stdio: "inherit", argv0: command });
+    spawnSync(fullPath, cmdArgs, {
+      stdio:
+        redirectFd !== null ? ["inherit", redirectFd, "inherit"] : "inherit",
+      argv0: command,
+    });
+    if (redirectFd !== null) closeSync(redirectFd);
     rl.prompt();
     return;
   }
