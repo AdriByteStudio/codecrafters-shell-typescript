@@ -75,11 +75,11 @@ function tokenize(input: string): string[] {
         i++;
       }
     } else if (char === ">") {
-      // Unquoted > is a redirection operator. A lone "1" immediately
-      // before it is the explicit stdout fd notation "1>".
-      if (current === "1") {
+      // Unquoted > is a redirection operator. A lone "1" or "2"
+      // immediately before it selects the fd: "1>" (stdout) or "2>" (stderr).
+      if (current === "1" || current === "2") {
+        tokens.push(`${current}>`);
         current = "";
-        tokens.push("1>");
       } else {
         if (inToken) {
           tokens.push(current);
@@ -119,28 +119,32 @@ rl.on("line", (input: string) => {
     return;
   }
 
-  // Extract stdout redirection: "> file" or "1> file".
-  let redirectPath: string | null = null;
+  // Extract redirections: "> file"/"1> file" (stdout), "2> file" (stderr).
+  let stdoutPath: string | null = null;
+  let stderrPath: string | null = null;
   const cmdArgs: string[] = [];
   for (let i = 0; i < args.length; i++) {
-    if ((args[i] === ">" || args[i] === "1>") && i + 1 < args.length) {
-      redirectPath = args[i + 1];
-      i++;
+    const tok = args[i];
+    if ((tok === ">" || tok === "1>") && i + 1 < args.length) {
+      stdoutPath = args[++i];
+    } else if (tok === "2>" && i + 1 < args.length) {
+      stderrPath = args[++i];
     } else {
-      cmdArgs.push(args[i]);
+      cmdArgs.push(tok);
     }
   }
 
-  let redirectFd: number | null = null;
-  if (redirectPath) {
+  const openRedirect = (target: string | null): number | null => {
+    if (!target) return null;
     try {
-      redirectFd = openSync(redirectPath, "w");
+      return openSync(target, "w");
     } catch {
-      console.log(`cd: ${redirectPath}: No such file or directory`);
-      rl.prompt();
-      return;
+      console.log(`cannot open ${target}`);
+      return null;
     }
-  }
+  };
+  const redirectFd = openRedirect(stdoutPath);
+  const errFd = openRedirect(stderrPath);
 
   // Route stdout lines to the redirected file when one is set.
   const out = (text: string): void => {
@@ -154,6 +158,7 @@ rl.on("line", (input: string) => {
   if (command === "echo") {
     out(cmdArgs.join(" "));
     if (redirectFd !== null) closeSync(redirectFd);
+    if (errFd !== null) closeSync(errFd);
     rl.prompt();
     return;
   }
@@ -177,6 +182,7 @@ rl.on("line", (input: string) => {
   if (command === "pwd") {
     out(process.cwd());
     if (redirectFd !== null) closeSync(redirectFd);
+    if (errFd !== null) closeSync(errFd);
     rl.prompt();
     return;
   }
@@ -194,6 +200,7 @@ rl.on("line", (input: string) => {
       }
     }
     if (redirectFd !== null) closeSync(redirectFd);
+    if (errFd !== null) closeSync(errFd);
     rl.prompt();
     return;
   }
@@ -203,11 +210,15 @@ rl.on("line", (input: string) => {
     // Match real shells: exec the resolved path but keep argv[0] as the
     // command name the user typed.
     spawnSync(fullPath, cmdArgs, {
-      stdio:
-        redirectFd !== null ? ["inherit", redirectFd, "inherit"] : "inherit",
+      stdio: [
+        "inherit",
+        redirectFd !== null ? redirectFd : "inherit",
+        errFd !== null ? errFd : "inherit",
+      ],
       argv0: command,
     });
     if (redirectFd !== null) closeSync(redirectFd);
+    if (errFd !== null) closeSync(errFd);
     rl.prompt();
     return;
   }
