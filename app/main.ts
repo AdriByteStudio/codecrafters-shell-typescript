@@ -55,6 +55,14 @@ function tokenize(input: string): string[] {
         i++;
       }
       i++; // skip the closing quote
+    } else if (char === "\\") {
+      // Outside quotes, a backslash escapes the next character literally.
+      inToken = true;
+      i++;
+      if (i < input.length) {
+        current += input[i];
+        i++;
+      }
     } else if (char === " " || char === "\t") {
       if (inToken) {
         tokens.push(current);
