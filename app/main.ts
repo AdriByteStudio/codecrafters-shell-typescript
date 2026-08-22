@@ -28,9 +28,9 @@ function findExecutableInPath(command: string): string | null {
   return null;
 }
 
-// Tokenize a command line: split on unquoted whitespace, treat characters
-// inside single quotes literally, and concatenate adjacent quoted/unquoted
-// segments into a single argument.
+// Tokenize a command line: split on unquoted whitespace; treat characters
+// inside single or double quotes literally (whitespace preserved); adjacent
+// quoted/unquoted segments concatenate into a single argument.
 function tokenize(input: string): string[] {
   const tokens: string[] = [];
   let current = "";
@@ -43,6 +43,14 @@ function tokenize(input: string): string[] {
       inToken = true;
       i++;
       while (i < input.length && input[i] !== "'") {
+        current += input[i];
+        i++;
+      }
+      i++; // skip the closing quote
+    } else if (char === '"') {
+      inToken = true;
+      i++;
+      while (i < input.length && input[i] !== '"') {
         current += input[i];
         i++;
       }
