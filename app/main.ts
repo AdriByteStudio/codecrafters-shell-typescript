@@ -4,11 +4,19 @@ import path from "path";
 import { spawnSync } from "child_process";
 
 // Tab completion: complete builtin commands, adding a trailing space so
-// the user can immediately type arguments.
+// the user can immediately type arguments. When nothing matches, leave the
+// input unchanged and ring the terminal bell.
 function completer(line: string): [string[], string] {
-  const hits = [...BUILTINS].filter((c) => c.startsWith(line)).sort();
+  // Node passes the whole line; only the last word gets completed.
+  const words = line.split(/\s+/);
+  const word = words[words.length - 1] ?? "";
+  const hits = [...BUILTINS].filter((c) => c.startsWith(word)).sort();
+  if (hits.length === 0) {
+    process.stdout.write("\x07"); // bell: no valid completions
+    return [[], line];
+  }
   // Single match: complete it with a trailing space.
-  return [hits.length === 1 ? [`${hits[0]} `] : hits, line];
+  return [hits.length === 1 ? [`${hits[0]} `] : hits, word];
 }
 
 const rl = createInterface({
