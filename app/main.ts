@@ -76,19 +76,21 @@ function tokenize(input: string): string[] {
       }
     } else if (char === ">") {
       // Unquoted > is a redirection operator. A lone "1" or "2"
-      // immediately before it selects the fd: "1>" (stdout) or "2>" (stderr).
+      // immediately before it selects the fd. A doubled ">" means append.
+      const isAppend = input[i + 1] === ">";
+      const op = isAppend ? ">>" : ">";
       if (current === "1" || current === "2") {
-        tokens.push(`${current}>`);
+        tokens.push(`${current}${op}`);
         current = "";
       } else {
         if (inToken) {
           tokens.push(current);
           current = "";
         }
-        tokens.push(">");
+        tokens.push(op);
       }
       inToken = false;
-      i++;
+      i += op.length;
     } else if (char === " " || char === "\t") {
       if (inToken) {
         tokens.push(current);
@@ -119,32 +121,41 @@ rl.on("line", (input: string) => {
     return;
   }
 
-  // Extract redirections: "> file"/"1> file" (stdout), "2> file" (stderr).
+  // Extract redirections: ">/1>" (stdout, truncate), ">>/1>>" (stdout,
+  // append), "2>"/"2>>" (stderr, truncate/append).
   let stdoutPath: string | null = null;
+  let stdoutAppend = false;
   let stderrPath: string | null = null;
+  let stderrAppend = false;
   const cmdArgs: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const tok = args[i];
     if ((tok === ">" || tok === "1>") && i + 1 < args.length) {
       stdoutPath = args[++i];
+    } else if ((tok === ">>" || tok === "1>>") && i + 1 < args.length) {
+      stdoutPath = args[++i];
+      stdoutAppend = true;
     } else if (tok === "2>" && i + 1 < args.length) {
       stderrPath = args[++i];
+    } else if (tok === "2>>" && i + 1 < args.length) {
+      stderrPath = args[++i];
+      stderrAppend = true;
     } else {
       cmdArgs.push(tok);
     }
   }
 
-  const openRedirect = (target: string | null): number | null => {
+  const openRedirect = (target: string | null, append: boolean): number | null => {
     if (!target) return null;
     try {
-      return openSync(target, "w");
+      return openSync(target, append ? "a" : "w");
     } catch {
       console.log(`cannot open ${target}`);
       return null;
     }
   };
-  const redirectFd = openRedirect(stdoutPath);
-  const errFd = openRedirect(stderrPath);
+  const redirectFd = openRedirect(stdoutPath, stdoutAppend);
+  const errFd = openRedirect(stderrPath, stderrAppend);
 
   // Route stdout lines to the redirected file when one is set.
   const out = (text: string): void => {
