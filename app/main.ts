@@ -3,10 +3,19 @@ import { accessSync, closeSync, constants, openSync, writeSync } from "fs";
 import path from "path";
 import { spawnSync } from "child_process";
 
+// Tab completion: complete builtin commands, adding a trailing space so
+// the user can immediately type arguments.
+function completer(line: string): [string[], string] {
+  const hits = [...BUILTINS].filter((c) => c.startsWith(line)).sort();
+  // Single match: complete it with a trailing space.
+  return [hits.length === 1 ? [`${hits[0]} `] : hits, line];
+}
+
 const rl = createInterface({
   input: process.stdin,
   output: process.stdout,
   prompt: "$ ",
+  completer,
 });
 
 rl.prompt();
