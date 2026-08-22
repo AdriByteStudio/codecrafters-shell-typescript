@@ -11,7 +11,7 @@ const rl = createInterface({
 
 rl.prompt();
 
-const BUILTINS = new Set(["echo", "exit", "type"]);
+const BUILTINS = new Set(["echo", "exit", "type", "pwd"]);
 
 function findExecutableInPath(command: string): string | null {
   const dirs = process.env.PATH ? process.env.PATH.split(path.delimiter) : [];
@@ -43,6 +43,12 @@ rl.on("line", (input: string) => {
 
   if (command === "echo") {
     console.log(args.join(" "));
+    rl.prompt();
+    return;
+  }
+
+  if (command === "pwd") {
+    console.log(process.cwd());
     rl.prompt();
     return;
   }
