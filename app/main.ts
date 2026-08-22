@@ -36,6 +36,17 @@ function findExecutableCompletions(word: string): string[] {
   return [...names].sort();
 }
 
+// Longest common prefix shared by all strings (non-empty input assumed).
+function longestCommonPrefix(strs: string[]): string {
+  let prefix = strs[0];
+  for (const s of strs) {
+    let i = 0;
+    while (i < prefix.length && i < s.length && prefix[i] === s[i]) i++;
+    prefix = prefix.slice(0, i);
+  }
+  return prefix;
+}
+
 // Tracks the last word a <TAB> was pressed for, to distinguish the first
 // tab (bell only) from subsequent tabs (list all matches).
 let lastTabWord: string | null = null;
@@ -71,8 +82,15 @@ function completer(line: string): [string[], string] {
     return [[], line];
   }
 
-  // Multiple matches: bell on first tab, list them alphabetically on the
-  // next tab, then redraw the prompt with the user's input preserved.
+  // Multiple matches: if they share a common prefix longer than what the
+  // user typed, complete up to it. Otherwise ring the bell on the first
+  // tab and list all matches alphabetically on the next tab.
+  const lcp = longestCommonPrefix(hits);
+  if (lcp.length > word.length) {
+    lastTabWord = null;
+    rl.write(lcp.slice(word.length));
+    return [[], line];
+  }
   if (lastTabWord !== word) {
     lastTabWord = word;
     process.stdout.write("\x07");
