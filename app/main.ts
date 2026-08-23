@@ -138,8 +138,10 @@ function completer(line: string): [string[], string] {
   // verbatim, so directories are never decorated with a trailing "/".
   const wordsBefore = beforeWord.trim() ? beforeWord.trim().split(/\s+/) : [];
   const cmdName = wordsBefore.length > 0 ? wordsBefore[0] : null;
+  // The word immediately before the one being completed (e.g. "git" for
+  // "git pu"); empty when no word precedes the cursor.
   const previousWord =
-    wordsBefore.length > 1 ? wordsBefore[wordsBefore.length - 1] : "";
+    wordsBefore.length > 0 ? wordsBefore[wordsBefore.length - 1] : "";
   const script = cmdName !== null ? completions.get(cmdName) : undefined;
   const decorateDirectories = script === undefined && !isCommandPosition;
 
