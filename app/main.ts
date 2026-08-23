@@ -377,6 +377,20 @@ rl.on("line", (input: string) => {
     return;
   }
 
+  if (command === "complete") {
+    // Only "-p <command>" is recognized so far. No specifications are
+    // tracked yet, so every query reports that none is registered.
+    const pIndex = cmdArgs.indexOf("-p");
+    const target = pIndex !== -1 ? cmdArgs[pIndex + 1] : undefined;
+    if (target) {
+      out(`complete: ${target}: no completion specification`);
+    }
+    if (redirectFd !== null) closeSync(redirectFd);
+    if (errFd !== null) closeSync(errFd);
+    rl.prompt();
+    return;
+  }
+
   const fullPath = findExecutableInPath(command);
   if (fullPath) {
     // Match real shells: exec the resolved path but keep argv[0] as the
