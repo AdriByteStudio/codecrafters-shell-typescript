@@ -871,12 +871,24 @@ rl.on("line", (input: string) => {
   }
 
   if (command === "declare") {
-    // "-p NAME" describes a variable; report when it isn't defined.
+    // "-p NAME" describes a variable; NAME=VALUE creates/overwrites one.
     if (cmdArgs[0] === "-p") {
       const name = cmdArgs[1];
-      if (name && !shellVariables.has(name)) {
-        out(`declare: ${name}: not found`);
+      if (name) {
+        const value = shellVariables.get(name);
+        if (value === undefined) {
+          out(`declare: ${name}: not found`);
+        } else {
+          out(`declare -- ${name}="${value}"`);
+        }
       }
+    } else if (cmdArgs[0] && /^[A-Za-z_][A-Za-z0-9_]*=/.test(cmdArgs[0])) {
+      const assignment = cmdArgs[0];
+      const eq = assignment.indexOf("=");
+      shellVariables.set(
+        assignment.slice(0, eq),
+        assignment.slice(eq + 1)
+      );
     }
     showPrompt();
     return;
