@@ -882,13 +882,18 @@ rl.on("line", (input: string) => {
           out(`declare -- ${name}="${value}"`);
         }
       }
-    } else if (cmdArgs[0] && /^[A-Za-z_][A-Za-z0-9_]*=/.test(cmdArgs[0])) {
+    } else if (cmdArgs[0]) {
       const assignment = cmdArgs[0];
-      const eq = assignment.indexOf("=");
-      shellVariables.set(
-        assignment.slice(0, eq),
-        assignment.slice(eq + 1)
-      );
+      if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(assignment)) {
+        const eq = assignment.indexOf("=");
+        shellVariables.set(
+          assignment.slice(0, eq),
+          assignment.slice(eq + 1)
+        );
+      } else {
+        // Invalid identifier: report and do not create the variable.
+        out(`declare: \`${assignment}\': not a valid identifier`);
+      }
     }
     showPrompt();
     return;
