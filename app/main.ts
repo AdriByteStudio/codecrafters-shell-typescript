@@ -235,6 +235,8 @@ interface Job {
   status: "Running" | "Done";
 }
 const jobs: Job[] = [];
+// Monotonic job numbering so ids stay unique after Done jobs are reaped.
+let nextJobId = 1;
 
 function findExecutableInPath(command: string): string | null {
   const dirs = process.env.PATH ? process.env.PATH.split(path.delimiter) : [];
@@ -395,8 +397,59 @@ rl.on("line", (input: string) => {
     }
   };
 
+  // Like out(), but writes text verbatim without appending a newline.
+  const outRaw = (text: string): void => {
+    if (redirectFd !== null) {
+      writeSync(redirectFd, text);
+    } else {
+      process.stdout.write(text);
+    }
+  };
+
   if (command === "echo") {
-    out(cmdArgs.join(" "));
+    // Parse leading -n/-e/-E flags (combinable, e.g. "-ne"), like bash.
+    let newline = true;
+    let interpretEscapes = false;
+    let argIndex = 0;
+    while (
+      argIndex < cmdArgs.length &&
+      cmdArgs[argIndex].length > 1 &&
+      /^-[neE]+$/.test(cmdArgs[argIndex])
+    ) {
+      for (const flagChar of cmdArgs[argIndex].slice(1)) {
+        if (flagChar === "n") newline = false;
+        else if (flagChar === "e") interpretEscapes = true;
+        else interpretEscapes = false;
+      }
+      argIndex++;
+    }
+    let text = cmdArgs.slice(argIndex).join(" ");
+    if (interpretEscapes) {
+      // Single pass so "\\\\" and "\\n" don't interfere with each other.
+      text = text.replace(/\\(.)/g, (match, ch: string) => {
+        switch (ch) {
+          case "n":
+            return "\n";
+          case "t":
+            return "\t";
+          case "r":
+            return "\r";
+          case "a":
+            return "\x07";
+          case "b":
+            return "\b";
+          case "f":
+            return "\f";
+          case "v":
+            return "\v";
+          case "\\":
+            return "\\";
+          default:
+            return match;
+        }
+      });
+    }
+    outRaw(text + (newline ? "\n" : ""));
     if (redirectFd !== null) closeSync(redirectFd);
     if (errFd !== null) closeSync(errFd);
     rl.prompt();
@@ -476,13 +529,22 @@ rl.on("line", (input: string) => {
   }
 
   if (command === "jobs") {
-    // Format: [id]<marker>  <status padded to 24>  <command> &
-    // Markers: "+" most recent job, "-" second most recent, " " all others.
-    const lastId = jobs.length;
+    // Format: [id]<marker>  <status padded to 24>  <command>[ &]
+    // Markers: "+" most recent job, "-" second most recent, " " others.
+    // Running jobs keep the trailing "&"; Done entries drop it.
+    const ids = jobs.map((j) => j.id);
+    const lastId = ids.length > 0 ? Math.max(...ids) : -1;
+    const prevId =
+      ids.length > 1 ? Math.max(...ids.filter((id) => id !== lastId)) : -2;
     for (const job of jobs) {
-      const marker = job.id === lastId ? "+" : job.id === lastId - 1 ? "-" : " ";
+      const marker = job.id === lastId ? "+" : job.id === prevId ? "-" : " ";
       const status = job.status.padEnd(24, " ");
-      out(`[${job.id}]${marker}  ${status}${job.command} &`);
+      const suffix = job.status === "Running" ? " &" : "";
+      out(`[${job.id}]${marker}  ${status}${job.command}${suffix}`);
+    }
+    // Reap finished jobs so they vanish from subsequent listings.
+    for (let i = jobs.length - 1; i >= 0; i--) {
+      if (jobs[i].status === "Done") jobs.splice(i, 1);
     }
     if (redirectFd !== null) closeSync(redirectFd);
     if (errFd !== null) closeSync(errFd);
@@ -497,15 +559,20 @@ rl.on("line", (input: string) => {
     if (isBackground) {
       // Don't wait for the child; report its job number and PID at once.
       const child = spawn(fullPath, cmdArgs, {
-        stdio: ["ignore", redirectFd !== null ? redirectFd : "inherit", errFd !== null ? errFd : "inherit"],
+        stdio: ["inherit", redirectFd !== null ? redirectFd : "inherit", errFd !== null ? errFd : "inherit"],
         argv0: command,
       });
       const job: Job = {
-        id: jobs.length + 1,
+        id: nextJobId++,
         pid: child.pid,
         command: [command, ...cmdArgs].join(" "),
         status: "Running",
       };
+      // Node reaps the child automatically; record normal exits so `jobs`
+      // can report them as Done and drop them from the table.
+      child.on("exit", (_code, signal) => {
+        if (signal === null) job.status = "Done";
+      });
       jobs.push(job);
       out(`[${job.id}] ${child.pid}`);
       if (redirectFd !== null) closeSync(redirectFd);
