@@ -477,9 +477,10 @@ rl.on("line", (input: string) => {
 
   if (command === "jobs") {
     // Format: [id]<marker>  <status padded to 24>  <command> &
-    // The most recent job is marked "+" (earlier ones get "-", like bash).
+    // Markers: "+" most recent job, "-" second most recent, " " all others.
+    const lastId = jobs.length;
     for (const job of jobs) {
-      const marker = job.id === jobs.length ? "+" : "-";
+      const marker = job.id === lastId ? "+" : job.id === lastId - 1 ? "-" : " ";
       const status = job.status.padEnd(24, " ");
       out(`[${job.id}]${marker}  ${status}${job.command} &`);
     }
