@@ -7,6 +7,7 @@ import {
   readFileSync,
   readdirSync,
   statSync,
+  writeFileSync,
   writeSync,
 } from "fs";
 import path from "path";
@@ -344,8 +345,8 @@ function builtinPipelineOutput(name: string, cmdArgs: string[]): string {
   if (name === "echo") return formatEchoOutput(cmdArgs);
   if (name === "pwd") return `${process.cwd()}\n`;
   if (name === "history") {
-    // "-r" is a side-effecting form; skip it inside pipelines.
-    if (cmdArgs[0] === "-r") return "";
+    // "-r"/"-w" are side-effecting forms; skip them inside pipelines.
+    if (cmdArgs[0] === "-r" || cmdArgs[0] === "-w") return "";
     const text = formatHistory(parseHistoryLimit(cmdArgs));
     return text.length > 0 ? `${text}\n` : "";
   }
@@ -799,6 +800,20 @@ rl.on("line", (input: string) => {
           }
         } catch {
           // Unreadable file: nothing to append.
+        }
+      }
+      showPrompt();
+      return;
+    }
+    // "-w <file>" writes every history entry (including this command) to
+    // the file, one per line with a trailing newline; creates it if missing.
+    if (cmdArgs[0] === "-w") {
+      const filePath = cmdArgs[1];
+      if (filePath) {
+        try {
+          writeFileSync(filePath, historyList.map((cmd) => `${cmd}\n`).join(""));
+        } catch {
+          // Unwritable target: nothing to do.
         }
       }
       showPrompt();
