@@ -264,14 +264,81 @@ function showPrompt(): void {
   rl.prompt();
 }
 
-// Execute a pipeline of external commands, wiring each command's stdout to
-// the next command's stdin. Waits for every member to finish before the
-// next prompt. Each segment supports its own > >> 2> 2>> redirections.
+// Render echo's full output (including -n/-e/-E flag handling) as text.
+// Shared by the standalone builtin handler and pipeline execution.
+function formatEchoOutput(cmdArgs: string[]): string {
+  let newline = true;
+  let interpretEscapes = false;
+  let argIndex = 0;
+  while (
+    argIndex < cmdArgs.length &&
+    cmdArgs[argIndex].length > 1 &&
+    /^-[neE]+$/.test(cmdArgs[argIndex])
+  ) {
+    for (const flagChar of cmdArgs[argIndex].slice(1)) {
+      if (flagChar === "n") newline = false;
+      else if (flagChar === "e") interpretEscapes = true;
+      else interpretEscapes = false;
+    }
+    argIndex++;
+  }
+  let text = cmdArgs.slice(argIndex).join(" ");
+  if (interpretEscapes) {
+    // Single pass so "\\\\" and "\\n" don't interfere with each other.
+    text = text.replace(/\\(.)/g, (match, ch: string) => {
+      switch (ch) {
+        case "n":
+          return "\n";
+        case "t":
+          return "\t";
+        case "r":
+          return "\r";
+        case "a":
+          return "\x07";
+        case "b":
+          return "\b";
+        case "f":
+          return "\f";
+        case "v":
+          return "\v";
+        case "\\":
+          return "\\";
+        default:
+          return match;
+      }
+    });
+  }
+  return text + (newline ? "\n" : "");
+}
+
+// Compute what a built-in prints when it runs as a pipeline member. Built-ins
+// here never read stdin, so only their output matters; side effects (cd,
+// jobs, complete, exit) are skipped, matching bash's subshell semantics.
+function builtinPipelineOutput(name: string, cmdArgs: string[]): string {
+  if (name === "echo") return formatEchoOutput(cmdArgs);
+  if (name === "pwd") return `${process.cwd()}\n`;
+  if (name === "type") {
+    const target = cmdArgs[0];
+    if (!target) return "";
+    if (BUILTINS.has(target)) return `${target} is a shell builtin\n`;
+    const fullPath = findExecutableInPath(target);
+    if (fullPath) return `${target} is ${fullPath}\n`;
+    return `${target}: not found\n`;
+  }
+  return "";
+}
+
+// Execute a pipeline, wiring each member's stdout to the next member's
+// stdin. Members may be external commands or shell built-ins; built-ins run
+// in-process with their captured output injected into the stream. Waits for
+// every external member to finish before the next prompt. Each segment
+// supports its own > >> 2> 2>> redirections.
 function runPipeline(segments: string[][]): void {
   void (async () => {
     const runs: {
       name: string;
-      fullPath: string;
+      isBuiltin: boolean;
+      fullPath: string | null;
       cmdArgs: string[];
       stdoutPath: string | null;
       stdoutAppend: boolean;
@@ -280,12 +347,6 @@ function runPipeline(segments: string[][]): void {
     }[] = [];
     for (const segment of segments) {
       const [name, ...rest] = segment;
-      const fullPath = name ? findExecutableInPath(name) : null;
-      if (!fullPath || !name) {
-        console.log(`${name}: command not found`);
-        showPrompt();
-        return;
-      }
       let stdoutPath: string | null = null;
       let stdoutAppend = false;
       let stderrPath: string | null = null;
@@ -307,8 +368,28 @@ function runPipeline(segments: string[][]): void {
           cmdArgs.push(tok);
         }
       }
+      if (name && BUILTINS.has(name)) {
+        runs.push({
+          name,
+          isBuiltin: true,
+          fullPath: null,
+          cmdArgs,
+          stdoutPath,
+          stdoutAppend,
+          stderrPath,
+          stderrAppend,
+        });
+        continue;
+      }
+      const fullPath = name ? findExecutableInPath(name) : null;
+      if (!fullPath || !name) {
+        console.log(`${name}: command not found`);
+        showPrompt();
+        return;
+      }
       runs.push({
         name,
+        isBuiltin: false,
         fullPath,
         cmdArgs,
         stdoutPath,
@@ -333,9 +414,46 @@ function runPipeline(segments: string[][]): void {
 
     const children: ReturnType<typeof spawn>[] = [];
     const fdsToClose: number[] = [];
+    // Output produced by built-in members that still has to flow to the
+    // next member of the pipeline.
+    let pendingOutput = "";
+    // The most recent spawned child whose stdout hasn't been routed yet.
+    let lastChild: ReturnType<typeof spawn> | null = null;
+
+    // A built-in consumes no stdin, so any upstream member's data goes
+    // nowhere; emulate bash by closing its stdout and SIGPIPE-ing it.
+    const discardUpstream = (): void => {
+      if (!lastChild) return;
+      lastChild.stdout?.destroy();
+      if (lastChild.exitCode === null && lastChild.signalCode === null) {
+        lastChild.kill("SIGPIPE");
+      }
+      lastChild = null;
+    };
+
     for (let i = 0; i < runs.length; i++) {
       const run = runs[i];
       const isLast = i === runs.length - 1;
+
+      if (run.isBuiltin) {
+        discardUpstream();
+        pendingOutput += builtinPipelineOutput(run.name, run.cmdArgs);
+        if (isLast && pendingOutput.length > 0) {
+          const outFd =
+            run.stdoutPath !== null
+              ? openRedirect(run.stdoutPath, run.stdoutAppend)
+              : null;
+          if (outFd !== null) {
+            writeSync(outFd, pendingOutput);
+            fdsToClose.push(outFd);
+          } else {
+            process.stdout.write(pendingOutput);
+          }
+          pendingOutput = "";
+        }
+        continue;
+      }
+
       const outFd =
         run.stdoutPath !== null
           ? openRedirect(run.stdoutPath, run.stdoutAppend)
@@ -346,7 +464,11 @@ function runPipeline(segments: string[][]): void {
           ? openRedirect(run.stderrPath, run.stderrAppend)
           : null;
       if (errFd !== null) fdsToClose.push(errFd);
-      const child = spawn(run.fullPath, run.cmdArgs, {
+      // stdin source: inherited terminal for the first member, piped data
+      // from a preceding external, or buffered output from a preceding
+      // built-in.
+      const feedsFromLastChild = lastChild !== null;
+      const child = spawn(run.fullPath!, run.cmdArgs, {
         stdio: [
           i === 0 ? "inherit" : "pipe",
           outFd !== null ? outFd : isLast ? "inherit" : "pipe",
@@ -360,9 +482,14 @@ function runPipeline(segments: string[][]): void {
       child.stdin?.on("error", () => {});
       child.stdout?.on("error", () => {});
       children.push(child);
-      if (i > 0 && outFd === null) {
-        children[i - 1].stdout!.pipe(child.stdin!);
+      if (feedsFromLastChild && outFd === null) {
+        lastChild!.stdout!.pipe(child.stdin!);
+      } else if (pendingOutput.length > 0) {
+        child.stdin?.write(pendingOutput);
+        child.stdin?.end();
+        pendingOutput = "";
       }
+      lastChild = child;
     }
 
     // Emulate OS-level pipeline teardown when a member exits: give the
@@ -591,49 +718,7 @@ rl.on("line", (input: string) => {
   };
 
   if (command === "echo") {
-    // Parse leading -n/-e/-E flags (combinable, e.g. "-ne"), like bash.
-    let newline = true;
-    let interpretEscapes = false;
-    let argIndex = 0;
-    while (
-      argIndex < cmdArgs.length &&
-      cmdArgs[argIndex].length > 1 &&
-      /^-[neE]+$/.test(cmdArgs[argIndex])
-    ) {
-      for (const flagChar of cmdArgs[argIndex].slice(1)) {
-        if (flagChar === "n") newline = false;
-        else if (flagChar === "e") interpretEscapes = true;
-        else interpretEscapes = false;
-      }
-      argIndex++;
-    }
-    let text = cmdArgs.slice(argIndex).join(" ");
-    if (interpretEscapes) {
-      // Single pass so "\\\\" and "\\n" don't interfere with each other.
-      text = text.replace(/\\(.)/g, (match, ch: string) => {
-        switch (ch) {
-          case "n":
-            return "\n";
-          case "t":
-            return "\t";
-          case "r":
-            return "\r";
-          case "a":
-            return "\x07";
-          case "b":
-            return "\b";
-          case "f":
-            return "\f";
-          case "v":
-            return "\v";
-          case "\\":
-            return "\\";
-          default:
-            return match;
-        }
-      });
-    }
-    outRaw(text + (newline ? "\n" : ""));
+    outRaw(formatEchoOutput(cmdArgs));
     if (redirectFd !== null) closeSync(redirectFd);
     if (errFd !== null) closeSync(errFd);
     showPrompt();
