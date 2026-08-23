@@ -232,6 +232,9 @@ const BUILTINS = new Set([
 // maps the command name to its completer script path.
 const completions = new Map<string, string>();
 
+// Shell variables created with `declare name=value`.
+const shellVariables = new Map<string, string>();
+
 // Background jobs started with a trailing "&", numbered sequentially from 1.
 interface Job {
   id: number;
@@ -868,7 +871,13 @@ rl.on("line", (input: string) => {
   }
 
   if (command === "declare") {
-    // Registered as a builtin; variable creation/inspection comes later.
+    // "-p NAME" describes a variable; report when it isn't defined.
+    if (cmdArgs[0] === "-p") {
+      const name = cmdArgs[1];
+      if (name && !shellVariables.has(name)) {
+        out(`declare: ${name}: not found`);
+      }
+    }
     showPrompt();
     return;
   }
