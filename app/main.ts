@@ -5,6 +5,7 @@ import {
   constants,
   openSync,
   readdirSync,
+  statSync,
   writeSync,
 } from "fs";
 import path from "path";
@@ -90,6 +91,9 @@ function completer(line: string): [string[], string] {
   const beforeWord = line.slice(0, line.length - word.length);
   const isCommandPosition = beforeWord.trim() === "";
 
+  // True when completing file/directory names rather than command names.
+  const completingFilenames = !isCommandPosition;
+
   const hits = isCommandPosition
     ? [
         ...new Set([
@@ -103,8 +107,18 @@ function completer(line: string): [string[], string] {
   // effect ourselves; bun's built-in completion insertion is unreliable.
   if (hits.length === 1) {
     lastTabWord = null;
-    // Complete in place with a trailing space, as if the user typed it.
-    rl.write(`${hits[0].slice(word.length)} `);
+    // Directories complete with a trailing "/" (no space) so the user can
+    // immediately tab again into the next path level; files get a space.
+    let suffix = " ";
+    if (completingFilenames) {
+      try {
+        if (statSync(hits[0]).isDirectory()) suffix = "/";
+      } catch {
+        // Unreadable or vanished entry: fall back to a trailing space.
+      }
+    }
+    // Complete in place with the appropriate suffix, as if the user typed it.
+    rl.write(`${hits[0].slice(word.length)}${suffix}`);
     return [[], line];
   }
 
