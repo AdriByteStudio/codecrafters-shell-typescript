@@ -63,18 +63,26 @@ function findFilenameCompletions(word: string): string[] {
 }
 
 // Runs a registered completer script, passing the completion context as
-// arguments: <command> <current word> <previous word>. Returns its
-// non-empty stdout lines, each one a completion candidate. Failures yield
-// no candidates.
+// arguments (<command> <current word> <previous word>) plus COMP_LINE and
+// COMP_POINT environment variables (full line text and cursor byte index).
+// Returns its non-empty stdout lines, each one a completion candidate.
+// Failures yield no candidates.
 function runCompleterScript(
   script: string,
   commandName: string,
   currentWord: string,
-  previousWord: string
+  previousWord: string,
+  line: string
 ): string[] {
   try {
     const result = spawnSync(script, [commandName, currentWord, previousWord], {
       encoding: "utf8",
+      env: {
+        ...process.env,
+        COMP_LINE: line,
+        // TAB fires at end of line, so the cursor sits at the last byte.
+        COMP_POINT: String(Buffer.byteLength(line)),
+      },
     });
     return (result.stdout ?? "")
       .split("\n")
@@ -136,7 +144,7 @@ function completer(line: string): [string[], string] {
 
   const hits =
     script !== undefined && cmdName !== null
-      ? runCompleterScript(script, cmdName, word, previousWord)
+      ? runCompleterScript(script, cmdName, word, previousWord, line)
       : isCommandPosition
       ? [
           ...new Set([
