@@ -232,6 +232,7 @@ interface Job {
   id: number;
   pid: number | undefined;
   command: string;
+  status: "Running" | "Done";
 }
 const jobs: Job[] = [];
 
@@ -475,7 +476,13 @@ rl.on("line", (input: string) => {
   }
 
   if (command === "jobs") {
-    // Background-job tracking arrives in later stages; nothing to list yet.
+    // Format: [id]<marker>  <status padded to 24>  <command> &
+    // The most recent job is marked "+" (earlier ones get "-", like bash).
+    for (const job of jobs) {
+      const marker = job.id === jobs.length ? "+" : "-";
+      const status = job.status.padEnd(24, " ");
+      out(`[${job.id}]${marker}  ${status}${job.command} &`);
+    }
     if (redirectFd !== null) closeSync(redirectFd);
     if (errFd !== null) closeSync(errFd);
     rl.prompt();
@@ -496,6 +503,7 @@ rl.on("line", (input: string) => {
         id: jobs.length + 1,
         pid: child.pid,
         command: [command, ...cmdArgs].join(" "),
+        status: "Running",
       };
       jobs.push(job);
       out(`[${job.id}] ${child.pid}`);
