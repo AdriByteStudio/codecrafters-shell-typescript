@@ -591,6 +591,16 @@ function runPipeline(segments: string[][]): void {
 }
 
 function findExecutableInPath(command: string): string | null {
+  // Commands containing "/" are paths (absolute or cwd-relative), not PATH
+  // lookups; accept them directly when they exist and are executable.
+  if (command.includes("/")) {
+    try {
+      accessSync(command, constants.F_OK | constants.X_OK);
+      return command;
+    } catch {
+      return null;
+    }
+  }
   const dirs = process.env.PATH ? process.env.PATH.split(path.delimiter) : [];
   for (const dir of dirs) {
     if (!dir) continue;
@@ -707,20 +717,25 @@ rl.on("line", (input: string) => {
   // current line is included before dispatch, so `history` lists itself too.
   historyList.push(input.trim());
 
-  // Expand $NAME references in every token before dispatch, looking up
-  // shell variables first and then the environment. A token made purely of
-  // expansions that all resolve to empty is dropped entirely (like bash
-  // removing an unquoted empty word); other tokens keep their placeholders
-  // replaced in place.
+  // Expand $NAME and ${NAME} references in every token before dispatch,
+  // looking up shell variables first and then the environment. Braces make
+  // the name boundary explicit so trailing text stays literal. A token made
+  // purely of expansions that all resolve to empty is dropped entirely
+  // (like bash removing an unquoted empty word); other tokens keep their
+  // placeholders replaced in place.
+  const expandUnit = "\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}|\\$[A-Za-z_][A-Za-z0-9_]*";
   const expandedTokens = tokens
     .map((tok) => {
       const result = tok.replace(
-        /\$([A-Za-z_][A-Za-z0-9_]*)/g,
-        (_, name: string) =>
-          shellVariables.get(name) ?? process.env[name] ?? ""
+        new RegExp(expandUnit, "g"),
+        (match: string) => {
+          const name = match.startsWith("${")
+            ? match.slice(2, -1)
+            : match.slice(1);
+          return shellVariables.get(name) ?? process.env[name] ?? "";
+        }
       );
-      const pureExpansion =
-        /^\$[A-Za-z_][A-Za-z0-9_]*(\$[A-Za-z_][A-Za-z0-9_]*)*$/.test(tok);
+      const pureExpansion = new RegExp(`^(?:${expandUnit})+$`).test(tok);
       return pureExpansion && result === "" ? null : result;
     })
     .filter((tok): tok is string => tok !== null);
