@@ -264,6 +264,143 @@ function showPrompt(): void {
   rl.prompt();
 }
 
+// Execute a pipeline of external commands, wiring each command's stdout to
+// the next command's stdin. Waits for every member to finish before the
+// next prompt. Each segment supports its own > >> 2> 2>> redirections.
+function runPipeline(segments: string[][]): void {
+  void (async () => {
+    const runs: {
+      name: string;
+      fullPath: string;
+      cmdArgs: string[];
+      stdoutPath: string | null;
+      stdoutAppend: boolean;
+      stderrPath: string | null;
+      stderrAppend: boolean;
+    }[] = [];
+    for (const segment of segments) {
+      const [name, ...rest] = segment;
+      const fullPath = name ? findExecutableInPath(name) : null;
+      if (!fullPath || !name) {
+        console.log(`${name}: command not found`);
+        showPrompt();
+        return;
+      }
+      let stdoutPath: string | null = null;
+      let stdoutAppend = false;
+      let stderrPath: string | null = null;
+      let stderrAppend = false;
+      const cmdArgs: string[] = [];
+      for (let i = 0; i < rest.length; i++) {
+        const tok = rest[i];
+        if ((tok === ">" || tok === "1>") && i + 1 < rest.length) {
+          stdoutPath = rest[++i];
+        } else if ((tok === ">>" || tok === "1>>") && i + 1 < rest.length) {
+          stdoutPath = rest[++i];
+          stdoutAppend = true;
+        } else if (tok === "2>" && i + 1 < rest.length) {
+          stderrPath = rest[++i];
+        } else if (tok === "2>>" && i + 1 < rest.length) {
+          stderrPath = rest[++i];
+          stderrAppend = true;
+        } else {
+          cmdArgs.push(tok);
+        }
+      }
+      runs.push({
+        name,
+        fullPath,
+        cmdArgs,
+        stdoutPath,
+        stdoutAppend,
+        stderrPath,
+        stderrAppend,
+      });
+    }
+
+    const openRedirect = (
+      target: string | null,
+      append: boolean
+    ): number | null => {
+      if (!target) return null;
+      try {
+        return openSync(target, append ? "a" : "w");
+      } catch {
+        console.log(`cannot open ${target}`);
+        return null;
+      }
+    };
+
+    const children: ReturnType<typeof spawn>[] = [];
+    const fdsToClose: number[] = [];
+    for (let i = 0; i < runs.length; i++) {
+      const run = runs[i];
+      const isLast = i === runs.length - 1;
+      const outFd =
+        run.stdoutPath !== null
+          ? openRedirect(run.stdoutPath, run.stdoutAppend)
+          : null;
+      if (outFd !== null) fdsToClose.push(outFd);
+      const errFd =
+        run.stderrPath !== null
+          ? openRedirect(run.stderrPath, run.stderrAppend)
+          : null;
+      if (errFd !== null) fdsToClose.push(errFd);
+      const child = spawn(run.fullPath, run.cmdArgs, {
+        stdio: [
+          i === 0 ? "inherit" : "pipe",
+          outFd !== null ? outFd : isLast ? "inherit" : "pipe",
+          errFd !== null ? errFd : "inherit",
+        ],
+        argv0: run.name,
+      });
+      // A downstream member may exit early (e.g. `head`); ignore the
+      // resulting EPIPE errors on the parent-side pipe ends instead of
+      // crashing. Upstream processes are signalled below on exit.
+      child.stdin?.on("error", () => {});
+      child.stdout?.on("error", () => {});
+      children.push(child);
+      if (i > 0 && outFd === null) {
+        children[i - 1].stdout!.pipe(child.stdin!);
+      }
+    }
+
+    // Emulate OS-level pipeline teardown when a member exits: give the
+    // downstream member EOF (destroy the writable feeding its stdin) and
+    // deliver SIGPIPE to the upstream member, whose writes could no longer
+    // go anywhere. Exactly what the kernel does with real pipe fds.
+    children.forEach((child, index) => {
+      child.on("exit", () => {
+        children[index]?.stdin?.destroy();
+        children[index - 1]?.stdout?.destroy();
+        const prev = children[index - 1];
+        if (prev && prev.exitCode === null && prev.signalCode === null) {
+          prev.kill("SIGPIPE");
+        }
+      });
+    });
+
+    await Promise.all(
+      children.map(
+        (child) =>
+          new Promise<void>((resolve) => {
+            let settled = false;
+            const done = () => {
+              if (!settled) {
+                settled = true;
+                resolve();
+              }
+            };
+            child.on("exit", done);
+            child.on("error", done);
+          })
+      )
+    );
+    for (const fd of fdsToClose) closeSync(fd);
+    showPrompt();
+  })();
+}
+
 function findExecutableInPath(command: string): string | null {
   const dirs = process.env.PATH ? process.env.PATH.split(path.delimiter) : [];
   for (const dir of dirs) {
@@ -342,6 +479,15 @@ function tokenize(input: string): string[] {
       }
       inToken = false;
       i += op.length;
+    } else if (char === "|") {
+      // Unquoted | is a pipeline operator.
+      if (inToken) {
+        tokens.push(current);
+        current = "";
+      }
+      tokens.push("|");
+      inToken = false;
+      i++;
     } else if (char === " " || char === "\t") {
       if (inToken) {
         tokens.push(current);
@@ -367,6 +513,18 @@ rl.on("line", (input: string) => {
     showPrompt();
     return;
   }
+
+  // Split the line into pipeline segments on unquoted "|" tokens.
+  const segments: string[][] = [[]];
+  for (const tok of tokens) {
+    if (tok === "|") segments.push([]);
+    else segments[segments.length - 1].push(tok);
+  }
+  if (segments.length > 1) {
+    runPipeline(segments);
+    return;
+  }
+
   const [command, ...args] = tokens;
 
   // A trailing "&" runs the remaining command in the background.
