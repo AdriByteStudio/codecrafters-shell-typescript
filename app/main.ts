@@ -36,21 +36,28 @@ function findExecutableCompletions(word: string): string[] {
   return [...names].sort();
 }
 
-// Collect file names in the current directory that start with `word`.
+// Collect file names matching the last word of an argument. The word may
+// include a directory part ("path/to/f"): everything up to and including the
+// last "/" selects the directory to list, the rest is the prefix. Returned
+// completions keep the directory part so they replace the whole word.
 // Hidden files only match when the typed prefix itself starts with a dot.
 function findFilenameCompletions(word: string): string[] {
+  const slash = word.lastIndexOf("/");
+  const dirPart = slash === -1 ? "" : word.slice(0, slash + 1);
+  const prefix = slash === -1 ? word : word.slice(slash + 1);
   let entries: string[];
   try {
-    entries = readdirSync(process.cwd());
+    entries = readdirSync(dirPart === "" ? process.cwd() : dirPart);
   } catch {
     return [];
   }
   return entries
     .filter(
       (name) =>
-        name.startsWith(word) &&
-        (word.startsWith(".") || !name.startsWith("."))
+        name.startsWith(prefix) &&
+        (prefix.startsWith(".") || !name.startsWith("."))
     )
+    .map((name) => dirPart + name)
     .sort();
 }
 
