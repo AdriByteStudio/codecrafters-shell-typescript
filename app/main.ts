@@ -238,6 +238,34 @@ const jobs: Job[] = [];
 // Monotonic job numbering so ids stay unique after Done jobs are reaped.
 let nextJobId = 1;
 
+// Print a Done line for every finished background job and drop those jobs
+// from the table. Used both by automatic reaping before each prompt and by
+// the jobs builtin, so a Done entry is displayed exactly once.
+function reapJobs(): void {
+  if (!jobs.some((job) => job.status === "Done")) return;
+  const ids = jobs.map((j) => j.id);
+  const lastId = Math.max(...ids);
+  const prevId =
+    ids.length > 1 ? Math.max(...ids.filter((id) => id !== lastId)) : -2;
+  for (const job of jobs) {
+    if (job.status !== "Done") continue;
+    const marker = job.id === lastId ? "+" : job.id === prevId ? "-" : " ";
+    process.stdout.write(
+      `[${job.id}]${marker}  ${job.status.padEnd(24, " ")}${job.command}\n`
+    );
+  }
+  for (let i = jobs.length - 1; i >= 0; i--) {
+    if (jobs[i].status === "Done") jobs.splice(i, 1);
+  }
+}
+
+// Show the next prompt, reaping any completed background jobs first so
+// their Done lines appear between the command output and the prompt.
+function showPrompt(): void {
+  reapJobs();
+  rl.prompt();
+}
+
 function findExecutableInPath(command: string): string | null {
   const dirs = process.env.PATH ? process.env.PATH.split(path.delimiter) : [];
   for (const dir of dirs) {
@@ -338,7 +366,7 @@ rl.on("line", (input: string) => {
   lastTabWord = null;
   const tokens = tokenize(input.trim());
   if (tokens.length === 0) {
-    rl.prompt();
+    showPrompt();
     return;
   }
   const [command, ...args] = tokens;
@@ -452,7 +480,7 @@ rl.on("line", (input: string) => {
     outRaw(text + (newline ? "\n" : ""));
     if (redirectFd !== null) closeSync(redirectFd);
     if (errFd !== null) closeSync(errFd);
-    rl.prompt();
+    showPrompt();
     return;
   }
 
@@ -469,7 +497,7 @@ rl.on("line", (input: string) => {
         console.log(`cd: ${args[0]}: No such file or directory`);
       }
     }
-    rl.prompt();
+    showPrompt();
     return;
   }
 
@@ -477,7 +505,7 @@ rl.on("line", (input: string) => {
     out(process.cwd());
     if (redirectFd !== null) closeSync(redirectFd);
     if (errFd !== null) closeSync(errFd);
-    rl.prompt();
+    showPrompt();
     return;
   }
 
@@ -495,7 +523,7 @@ rl.on("line", (input: string) => {
     }
     if (redirectFd !== null) closeSync(redirectFd);
     if (errFd !== null) closeSync(errFd);
-    rl.prompt();
+    showPrompt();
     return;
   }
 
@@ -524,7 +552,7 @@ rl.on("line", (input: string) => {
     }
     if (redirectFd !== null) closeSync(redirectFd);
     if (errFd !== null) closeSync(errFd);
-    rl.prompt();
+    showPrompt();
     return;
   }
 
@@ -548,7 +576,7 @@ rl.on("line", (input: string) => {
     }
     if (redirectFd !== null) closeSync(redirectFd);
     if (errFd !== null) closeSync(errFd);
-    rl.prompt();
+    showPrompt();
     return;
   }
 
@@ -577,7 +605,7 @@ rl.on("line", (input: string) => {
       out(`[${job.id}] ${child.pid}`);
       if (redirectFd !== null) closeSync(redirectFd);
       if (errFd !== null) closeSync(errFd);
-      rl.prompt();
+      showPrompt();
       return;
     }
     spawnSync(fullPath, cmdArgs, {
@@ -590,12 +618,12 @@ rl.on("line", (input: string) => {
     });
     if (redirectFd !== null) closeSync(redirectFd);
     if (errFd !== null) closeSync(errFd);
-    rl.prompt();
+    showPrompt();
     return;
   }
 
   console.log(`${command}: command not found`);
-  rl.prompt();
+  showPrompt();
 });
 
 rl.on("close", () => {
