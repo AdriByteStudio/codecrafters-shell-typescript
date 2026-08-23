@@ -171,6 +171,10 @@ rl.prompt();
 
 const BUILTINS = new Set(["echo", "exit", "type", "pwd", "cd", "complete"]);
 
+// Programmable completions registered with `complete -C <script> <command>`:
+// maps the command name to its completer script path.
+const completions = new Map<string, string>();
+
 function findExecutableInPath(command: string): string | null {
   const dirs = process.env.PATH ? process.env.PATH.split(path.delimiter) : [];
   for (const dir of dirs) {
@@ -378,12 +382,23 @@ rl.on("line", (input: string) => {
   }
 
   if (command === "complete") {
-    // Only "-p <command>" is recognized so far. No specifications are
-    // tracked yet, so every query reports that none is registered.
+    // "-C <script> <command>" registers a completer; "-p <command>" prints
+    // the stored spec in normalized form (single quotes around the path,
+    // single spaces) or reports that none is registered.
+    const cIndex = cmdArgs.indexOf("-C");
     const pIndex = cmdArgs.indexOf("-p");
-    const target = pIndex !== -1 ? cmdArgs[pIndex + 1] : undefined;
-    if (target) {
-      out(`complete: ${target}: no completion specification`);
+    if (cIndex !== -1 && cmdArgs[cIndex + 1] && cmdArgs[cIndex + 2]) {
+      completions.set(cmdArgs[cIndex + 2], cmdArgs[cIndex + 1]);
+    } else if (pIndex !== -1) {
+      const target = cmdArgs[pIndex + 1];
+      if (target) {
+        const script = completions.get(target);
+        if (script) {
+          out(`complete -C '${script}' ${target}`);
+        } else {
+          out(`complete: ${target}: no completion specification`);
+        }
+      }
     }
     if (redirectFd !== null) closeSync(redirectFd);
     if (errFd !== null) closeSync(errFd);
