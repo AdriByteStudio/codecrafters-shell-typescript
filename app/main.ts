@@ -169,7 +169,7 @@ const rl = createInterface({
 
 rl.prompt();
 
-const BUILTINS = new Set(["echo", "exit", "type", "pwd", "cd"]);
+const BUILTINS = new Set(["echo", "exit", "type", "pwd", "cd", "complete"]);
 
 function findExecutableInPath(command: string): string | null {
   const dirs = process.env.PATH ? process.env.PATH.split(path.delimiter) : [];
