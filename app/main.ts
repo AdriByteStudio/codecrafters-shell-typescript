@@ -9,7 +9,7 @@ import {
   writeSync,
 } from "fs";
 import path from "path";
-import { spawnSync } from "child_process";
+import { spawn, spawnSync } from "child_process";
 
 // Collect executable file names in PATH directories that start with `word`.
 // Missing/unreadable directories are skipped gracefully.
@@ -227,6 +227,14 @@ const BUILTINS = new Set([
 // maps the command name to its completer script path.
 const completions = new Map<string, string>();
 
+// Background jobs started with a trailing "&", numbered sequentially from 1.
+interface Job {
+  id: number;
+  pid: number | undefined;
+  command: string;
+}
+const jobs: Job[] = [];
+
 function findExecutableInPath(command: string): string | null {
   const dirs = process.env.PATH ? process.env.PATH.split(path.delimiter) : [];
   for (const dir of dirs) {
@@ -331,6 +339,10 @@ rl.on("line", (input: string) => {
     return;
   }
   const [command, ...args] = tokens;
+
+  // A trailing "&" runs the remaining command in the background.
+  const isBackground = args.length > 0 && args[args.length - 1] === "&";
+  if (isBackground) args.pop();
 
   if (command === "exit") {
     rl.close();
@@ -474,6 +486,24 @@ rl.on("line", (input: string) => {
   if (fullPath) {
     // Match real shells: exec the resolved path but keep argv[0] as the
     // command name the user typed.
+    if (isBackground) {
+      // Don't wait for the child; report its job number and PID at once.
+      const child = spawn(fullPath, cmdArgs, {
+        stdio: ["ignore", redirectFd !== null ? redirectFd : "inherit", errFd !== null ? errFd : "inherit"],
+        argv0: command,
+      });
+      const job: Job = {
+        id: jobs.length + 1,
+        pid: child.pid,
+        command: [command, ...cmdArgs].join(" "),
+      };
+      jobs.push(job);
+      out(`[${job.id}] ${child.pid}`);
+      if (redirectFd !== null) closeSync(redirectFd);
+      if (errFd !== null) closeSync(errFd);
+      rl.prompt();
+      return;
+    }
     spawnSync(fullPath, cmdArgs, {
       stdio: [
         "inherit",
