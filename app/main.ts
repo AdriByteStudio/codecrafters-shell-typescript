@@ -235,8 +235,6 @@ interface Job {
   status: "Running" | "Done";
 }
 const jobs: Job[] = [];
-// Monotonic job numbering so ids stay unique after Done jobs are reaped.
-let nextJobId = 1;
 
 // Print a Done line for every finished background job and drop those jobs
 // from the table. Used both by automatic reaping before each prompt and by
@@ -591,7 +589,9 @@ rl.on("line", (input: string) => {
         argv0: command,
       });
       const job: Job = {
-        id: nextJobId++,
+        // Recycled numbering: [1] for an empty table, otherwise one more
+        // than the highest number still in it.
+        id: jobs.length === 0 ? 1 : Math.max(...jobs.map((j) => j.id)) + 1,
         pid: child.pid,
         command: [command, ...cmdArgs].join(" "),
         status: "Running",
