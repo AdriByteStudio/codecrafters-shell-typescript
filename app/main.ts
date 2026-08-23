@@ -4,6 +4,7 @@ import {
   closeSync,
   constants,
   openSync,
+  readFileSync,
   readdirSync,
   statSync,
   writeSync,
@@ -343,6 +344,8 @@ function builtinPipelineOutput(name: string, cmdArgs: string[]): string {
   if (name === "echo") return formatEchoOutput(cmdArgs);
   if (name === "pwd") return `${process.cwd()}\n`;
   if (name === "history") {
+    // "-r" is a side-effecting form; skip it inside pipelines.
+    if (cmdArgs[0] === "-r") return "";
     const text = formatHistory(parseHistoryLimit(cmdArgs));
     return text.length > 0 ? `${text}\n` : "";
   }
@@ -784,6 +787,23 @@ rl.on("line", (input: string) => {
   }
 
   if (command === "history") {
+    // "-r <file>" appends the file's non-empty lines to the history list
+    // in memory without printing anything.
+    if (cmdArgs[0] === "-r") {
+      const filePath = cmdArgs[1];
+      if (filePath) {
+        try {
+          const content = readFileSync(filePath, "utf8");
+          for (const line of content.split("\n")) {
+            if (line.replace(/\r$/, "").trim() !== "") historyList.push(line);
+          }
+        } catch {
+          // Unreadable file: nothing to append.
+        }
+      }
+      showPrompt();
+      return;
+    }
     const text = formatHistory(parseHistoryLimit(cmdArgs));
     if (text) out(text);
     if (redirectFd !== null) closeSync(redirectFd);
