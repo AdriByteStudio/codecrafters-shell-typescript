@@ -248,6 +248,24 @@ const historyList: string[] = [];
 // repeated -a runs only append commands executed since the last flush.
 let historyFlushedCount = 0;
 
+// Append a history file's non-empty lines to the in-memory history list.
+// Used by `history -r` and for loading $HISTFILE on startup.
+function appendHistoryFile(filePath: string): void {
+  try {
+    const content = readFileSync(filePath, "utf8");
+    for (const line of content.split("\n")) {
+      if (line.replace(/\r$/, "").trim() !== "") historyList.push(line);
+    }
+  } catch {
+    // Missing or unreadable file: nothing to load.
+  }
+}
+
+// Load persisted history into memory when $HISTFILE is set.
+if (process.env.HISTFILE) {
+  appendHistoryFile(process.env.HISTFILE);
+}
+
 // Render the `history` listing: right-aligned entry numbers of width five,
 // two spaces, then the command text. An optional limit shows only the last
 // `limit` entries while keeping their original numbering (bash semantics).
@@ -800,14 +818,7 @@ rl.on("line", (input: string) => {
     if (cmdArgs[0] === "-r") {
       const filePath = cmdArgs[1];
       if (filePath) {
-        try {
-          const content = readFileSync(filePath, "utf8");
-          for (const line of content.split("\n")) {
-            if (line.replace(/\r$/, "").trim() !== "") historyList.push(line);
-          }
-        } catch {
-          // Unreadable file: nothing to append.
-        }
+        appendHistoryFile(filePath);
       }
       showPrompt();
       return;
