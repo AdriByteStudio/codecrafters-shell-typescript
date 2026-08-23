@@ -213,7 +213,15 @@ const rl = createInterface({
 
 rl.prompt();
 
-const BUILTINS = new Set(["echo", "exit", "type", "pwd", "cd", "complete"]);
+const BUILTINS = new Set([
+  "echo",
+  "exit",
+  "type",
+  "pwd",
+  "cd",
+  "complete",
+  "jobs",
+]);
 
 // Programmable completions registered with `complete -C <script> <command>`:
 // maps the command name to its completer script path.
@@ -448,6 +456,14 @@ rl.on("line", (input: string) => {
         }
       }
     }
+    if (redirectFd !== null) closeSync(redirectFd);
+    if (errFd !== null) closeSync(errFd);
+    rl.prompt();
+    return;
+  }
+
+  if (command === "jobs") {
+    // Background-job tracking arrives in later stages; nothing to list yet.
     if (redirectFd !== null) closeSync(redirectFd);
     if (errFd !== null) closeSync(errFd);
     rl.prompt();
