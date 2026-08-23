@@ -225,6 +225,7 @@ const BUILTINS = new Set([
   "complete",
   "jobs",
   "history",
+  "declare",
 ]);
 
 // Programmable completions registered with `complete -C <script> <command>`:
@@ -862,6 +863,12 @@ rl.on("line", (input: string) => {
     if (text) out(text);
     if (redirectFd !== null) closeSync(redirectFd);
     if (errFd !== null) closeSync(errFd);
+    showPrompt();
+    return;
+  }
+
+  if (command === "declare") {
+    // Registered as a builtin; variable creation/inspection comes later.
     showPrompt();
     return;
   }
