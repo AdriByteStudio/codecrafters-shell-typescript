@@ -1,6 +1,7 @@
 import { createInterface } from "readline";
 import {
   accessSync,
+  appendFileSync,
   closeSync,
   constants,
   openSync,
@@ -243,6 +244,10 @@ const jobs: Job[] = [];
 // including the `history` invocation itself (like bash).
 const historyList: string[] = [];
 
+// Number of history entries already appended to disk by `history -a`, so
+// repeated -a runs only append commands executed since the last flush.
+let historyFlushedCount = 0;
+
 // Render the `history` listing: right-aligned entry numbers of width five,
 // two spaces, then the command text. An optional limit shows only the last
 // `limit` entries while keeping their original numbering (bash semantics).
@@ -345,8 +350,10 @@ function builtinPipelineOutput(name: string, cmdArgs: string[]): string {
   if (name === "echo") return formatEchoOutput(cmdArgs);
   if (name === "pwd") return `${process.cwd()}\n`;
   if (name === "history") {
-    // "-r"/"-w" are side-effecting forms; skip them inside pipelines.
-    if (cmdArgs[0] === "-r" || cmdArgs[0] === "-w") return "";
+    // "-r"/"-w"/"-a" are side-effecting forms; skip them inside pipelines.
+    if (cmdArgs[0] === "-r" || cmdArgs[0] === "-w" || cmdArgs[0] === "-a") {
+      return "";
+    }
     const text = formatHistory(parseHistoryLimit(cmdArgs));
     return text.length > 0 ? `${text}\n` : "";
   }
@@ -800,6 +807,27 @@ rl.on("line", (input: string) => {
           }
         } catch {
           // Unreadable file: nothing to append.
+        }
+      }
+      showPrompt();
+      return;
+    }
+    // "-a <file>" appends entries executed since the last flush (including
+    // this command) to the file, one per line with a trailing newline.
+    if (cmdArgs[0] === "-a") {
+      const filePath = cmdArgs[1];
+      if (filePath) {
+        const newEntries = historyList.slice(historyFlushedCount);
+        if (newEntries.length > 0) {
+          try {
+            appendFileSync(
+              filePath,
+              newEntries.map((cmd) => `${cmd}\n`).join("")
+            );
+          } catch {
+            // Unwritable target: nothing to do.
+          }
+          historyFlushedCount = historyList.length;
         }
       }
       showPrompt();
