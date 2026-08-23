@@ -62,11 +62,20 @@ function findFilenameCompletions(word: string): string[] {
     .sort();
 }
 
-// Runs a registered completer script and returns its non-empty stdout
-// lines, each one a completion candidate. Failures yield no candidates.
-function runCompleterScript(script: string): string[] {
+// Runs a registered completer script, passing the completion context as
+// arguments: <command> <current word> <previous word>. Returns its
+// non-empty stdout lines, each one a completion candidate. Failures yield
+// no candidates.
+function runCompleterScript(
+  script: string,
+  commandName: string,
+  currentWord: string,
+  previousWord: string
+): string[] {
   try {
-    const result = spawnSync(script, [], { encoding: "utf8" });
+    const result = spawnSync(script, [commandName, currentWord, previousWord], {
+      encoding: "utf8",
+    });
     return (result.stdout ?? "")
       .split("\n")
       .map((l) => l.replace(/\r$/, ""))
@@ -118,13 +127,17 @@ function completer(line: string): [string[], string] {
   // A completer registered for the line's command takes precedence over
   // built-in filename/command completion. Its candidates are inserted
   // verbatim, so directories are never decorated with a trailing "/".
-  const cmdName = isCommandPosition ? null : beforeWord.trim().split(/\s+/)[0];
-  const script = cmdName ? completions.get(cmdName) : undefined;
-  const decorateDirectories = !script && !isCommandPosition;
+  const wordsBefore = beforeWord.trim() ? beforeWord.trim().split(/\s+/) : [];
+  const cmdName = wordsBefore.length > 0 ? wordsBefore[0] : null;
+  const previousWord =
+    wordsBefore.length > 1 ? wordsBefore[wordsBefore.length - 1] : "";
+  const script = cmdName !== null ? completions.get(cmdName) : undefined;
+  const decorateDirectories = script === undefined && !isCommandPosition;
 
-  const hits = script
-    ? runCompleterScript(script)
-    : isCommandPosition
+  const hits =
+    script !== undefined && cmdName !== null
+      ? runCompleterScript(script, cmdName, word, previousWord)
+      : isCommandPosition
       ? [
           ...new Set([
             ...[...BUILTINS].filter((c) => c.startsWith(word)),
