@@ -426,13 +426,17 @@ rl.on("line", (input: string) => {
   }
 
   if (command === "complete") {
-    // "-C <script> <command>" registers a completer; "-p <command>" prints
-    // the stored spec in normalized form (single quotes around the path,
-    // single spaces) or reports that none is registered.
+    // "-C <script> <command>" registers a completer; "-r <command>" removes
+    // its rule (silently, even if none exists); "-p <command>" prints the
+    // stored spec in normalized form (single quotes around the path, single
+    // spaces) or reports that none is registered.
     const cIndex = cmdArgs.indexOf("-C");
+    const rIndex = cmdArgs.indexOf("-r");
     const pIndex = cmdArgs.indexOf("-p");
     if (cIndex !== -1 && cmdArgs[cIndex + 1] && cmdArgs[cIndex + 2]) {
       completions.set(cmdArgs[cIndex + 2], cmdArgs[cIndex + 1]);
+    } else if (rIndex !== -1 && cmdArgs[rIndex + 1]) {
+      completions.delete(cmdArgs[rIndex + 1]);
     } else if (pIndex !== -1) {
       const target = cmdArgs[pIndex + 1];
       if (target) {
