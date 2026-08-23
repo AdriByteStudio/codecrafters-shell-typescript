@@ -62,6 +62,20 @@ function findFilenameCompletions(word: string): string[] {
     .sort();
 }
 
+// Runs a registered completer script and returns its non-empty stdout
+// lines, each one a completion candidate. Failures yield no candidates.
+function runCompleterScript(script: string): string[] {
+  try {
+    const result = spawnSync(script, [], { encoding: "utf8" });
+    return (result.stdout ?? "")
+      .split("\n")
+      .map((l) => l.replace(/\r$/, ""))
+      .filter((l) => l !== "");
+  } catch {
+    return [];
+  }
+}
+
 // Format a filename match for display: directories get a trailing "/",
 // files are shown bare. Unreadable entries fall back to their plain name.
 function displayEntry(entry: string): string {
@@ -101,17 +115,23 @@ function completer(line: string): [string[], string] {
   const beforeWord = line.slice(0, line.length - word.length);
   const isCommandPosition = beforeWord.trim() === "";
 
-  // True when completing file/directory names rather than command names.
-  const completingFilenames = !isCommandPosition;
+  // A completer registered for the line's command takes precedence over
+  // built-in filename/command completion. Its candidates are inserted
+  // verbatim, so directories are never decorated with a trailing "/".
+  const cmdName = isCommandPosition ? null : beforeWord.trim().split(/\s+/)[0];
+  const script = cmdName ? completions.get(cmdName) : undefined;
+  const decorateDirectories = !script && !isCommandPosition;
 
-  const hits = isCommandPosition
-    ? [
-        ...new Set([
-          ...[...BUILTINS].filter((c) => c.startsWith(word)),
-          ...findExecutableCompletions(word),
-        ]),
-      ].sort()
-    : findFilenameCompletions(word);
+  const hits = script
+    ? runCompleterScript(script)
+    : isCommandPosition
+      ? [
+          ...new Set([
+            ...[...BUILTINS].filter((c) => c.startsWith(word)),
+            ...findExecutableCompletions(word),
+          ]),
+        ].sort()
+      : findFilenameCompletions(word);
 
   // Always report "no completions" to readline and perform the desired
   // effect ourselves; bun's built-in completion insertion is unreliable.
@@ -120,7 +140,7 @@ function completer(line: string): [string[], string] {
     // Directories complete with a trailing "/" (no space) so the user can
     // immediately tab again into the next path level; files get a space.
     let suffix = " ";
-    if (completingFilenames) {
+    if (decorateDirectories) {
       try {
         if (statSync(hits[0]).isDirectory()) suffix = "/";
       } catch {
@@ -154,7 +174,7 @@ function completer(line: string): [string[], string] {
   }
   // Keep tracking the word so every subsequent tab re-lists the matches.
   // Directories are decorated with a trailing "/"; sorting stays by raw name.
-  const shown = completingFilenames ? hits.map(displayEntry) : hits;
+  const shown = decorateDirectories ? hits.map(displayEntry) : hits;
   process.stdout.write(`\n${shown.join("  ")}\n`);
   rl.prompt(true);
   return [[], line];
