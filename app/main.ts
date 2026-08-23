@@ -62,6 +62,16 @@ function findFilenameCompletions(word: string): string[] {
     .sort();
 }
 
+// Format a filename match for display: directories get a trailing "/",
+// files are shown bare. Unreadable entries fall back to their plain name.
+function displayEntry(entry: string): string {
+  try {
+    return statSync(entry).isDirectory() ? `${entry}/` : entry;
+  } catch {
+    return entry;
+  }
+}
+
 // Longest common prefix shared by all strings (non-empty input assumed).
 function longestCommonPrefix(strs: string[]): string {
   let prefix = strs[0];
@@ -142,8 +152,10 @@ function completer(line: string): [string[], string] {
     process.stdout.write("\x07");
     return [[], line];
   }
-  lastTabWord = null;
-  process.stdout.write(`\n${hits.join("  ")}\n`);
+  // Keep tracking the word so every subsequent tab re-lists the matches.
+  // Directories are decorated with a trailing "/"; sorting stays by raw name.
+  const shown = completingFilenames ? hits.map(displayEntry) : hits;
+  process.stdout.write(`\n${shown.join("  ")}\n`);
   rl.prompt(true);
   return [[], line];
 }
@@ -255,6 +267,8 @@ function tokenize(input: string): string[] {
 }
 
 rl.on("line", (input: string) => {
+  // A fresh line starts a new completion sequence.
+  lastTabWord = null;
   const tokens = tokenize(input.trim());
   if (tokens.length === 0) {
     rl.prompt();
