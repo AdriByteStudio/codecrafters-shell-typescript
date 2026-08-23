@@ -36,6 +36,24 @@ function findExecutableCompletions(word: string): string[] {
   return [...names].sort();
 }
 
+// Collect file names in the current directory that start with `word`.
+// Hidden files only match when the typed prefix itself starts with a dot.
+function findFilenameCompletions(word: string): string[] {
+  let entries: string[];
+  try {
+    entries = readdirSync(process.cwd());
+  } catch {
+    return [];
+  }
+  return entries
+    .filter(
+      (name) =>
+        name.startsWith(word) &&
+        (word.startsWith(".") || !name.startsWith("."))
+    )
+    .sort();
+}
+
 // Longest common prefix shared by all strings (non-empty input assumed).
 function longestCommonPrefix(strs: string[]): string {
   let prefix = strs[0];
@@ -58,14 +76,21 @@ let lastTabWord: string | null = null;
 // the next tab.
 function completer(line: string): [string[], string] {
   // Node passes the whole line; only the last word gets completed.
-  const words = line.split(/\s+/);
-  const word = words[words.length - 1] ?? "";
-  const hits = [
-    ...new Set([
-      ...[...BUILTINS].filter((c) => c.startsWith(word)),
-      ...findExecutableCompletions(word),
-    ]),
-  ].sort();
+  const wordMatch = /(\S*)$/.exec(line);
+  const word = wordMatch ? wordMatch[1] : "";
+  // Everything before the last word; if it is only whitespace, the word
+  // being completed sits in command position, otherwise it is an argument.
+  const beforeWord = line.slice(0, line.length - word.length);
+  const isCommandPosition = beforeWord.trim() === "";
+
+  const hits = isCommandPosition
+    ? [
+        ...new Set([
+          ...[...BUILTINS].filter((c) => c.startsWith(word)),
+          ...findExecutableCompletions(word),
+        ]),
+      ].sort()
+    : findFilenameCompletions(word);
 
   // Always report "no completions" to readline and perform the desired
   // effect ourselves; bun's built-in completion insertion is unreliable.
@@ -275,9 +300,10 @@ rl.on("line", (input: string) => {
   }
 
   if (command === "cd") {
+    const home = process.env.HOME;
     let target = args[0];
-    if (target === "~") {
-      target = process.env.HOME;
+    if (target === "~" && home !== undefined) {
+      target = home;
     }
     if (target) {
       try {
