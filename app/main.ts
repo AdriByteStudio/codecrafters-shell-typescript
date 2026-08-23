@@ -87,7 +87,8 @@ function runCompleterScript(
     return (result.stdout ?? "")
       .split("\n")
       .map((l) => l.replace(/\r$/, ""))
-      .filter((l) => l !== "");
+      .filter((l) => l !== "")
+      .sort();
   } catch {
     return [];
   }
