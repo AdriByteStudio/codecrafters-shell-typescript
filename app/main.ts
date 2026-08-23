@@ -707,6 +707,26 @@ rl.on("line", (input: string) => {
   // current line is included before dispatch, so `history` lists itself too.
   historyList.push(input.trim());
 
+  // Expand $NAME references in every token before dispatch, looking up
+  // shell variables first and then the environment. A token made purely of
+  // expansions that all resolve to empty is dropped entirely (like bash
+  // removing an unquoted empty word); other tokens keep their placeholders
+  // replaced in place.
+  const expandedTokens = tokens
+    .map((tok) => {
+      const result = tok.replace(
+        /\$([A-Za-z_][A-Za-z0-9_]*)/g,
+        (_, name: string) =>
+          shellVariables.get(name) ?? process.env[name] ?? ""
+      );
+      const pureExpansion =
+        /^\$[A-Za-z_][A-Za-z0-9_]*(\$[A-Za-z_][A-Za-z0-9_]*)*$/.test(tok);
+      return pureExpansion && result === "" ? null : result;
+    })
+    .filter((tok): tok is string => tok !== null);
+  tokens.length = 0;
+  tokens.push(...expandedTokens);
+
   // Split the line into pipeline segments on unquoted "|" tokens.
   const segments: string[][] = [[]];
   for (const tok of tokens) {
