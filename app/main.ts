@@ -221,6 +221,7 @@ const BUILTINS = new Set([
   "cd",
   "complete",
   "jobs",
+  "history",
 ]);
 
 // Programmable completions registered with `complete -C <script> <command>`:
@@ -235,6 +236,18 @@ interface Job {
   status: "Running" | "Done";
 }
 const jobs: Job[] = [];
+
+// Command history for the `history` builtin: every non-empty executed line,
+// including the `history` invocation itself (like bash).
+const historyList: string[] = [];
+
+// Render the `history` listing: right-aligned entry numbers of width five,
+// two spaces, then the command text.
+function formatHistory(): string {
+  return historyList
+    .map((cmd, index) => `${String(index + 1).padStart(5, " ")}  ${cmd}`)
+    .join("\n");
+}
 
 // Print a Done line for every finished background job and drop those jobs
 // from the table. Used both by automatic reaping before each prompt and by
@@ -317,6 +330,10 @@ function formatEchoOutput(cmdArgs: string[]): string {
 function builtinPipelineOutput(name: string, cmdArgs: string[]): string {
   if (name === "echo") return formatEchoOutput(cmdArgs);
   if (name === "pwd") return `${process.cwd()}\n`;
+  if (name === "history") {
+    const text = formatHistory();
+    return text.length > 0 ? `${text}\n` : "";
+  }
   if (name === "type") {
     const target = cmdArgs[0];
     if (!target) return "";
@@ -641,6 +658,10 @@ rl.on("line", (input: string) => {
     return;
   }
 
+  // Record every non-empty executed line for the `history` builtin. The
+  // current line is included before dispatch, so `history` lists itself too.
+  historyList.push(input.trim());
+
   // Split the line into pipeline segments on unquoted "|" tokens.
   const segments: string[][] = [[]];
   for (const tok of tokens) {
@@ -744,6 +765,15 @@ rl.on("line", (input: string) => {
 
   if (command === "pwd") {
     out(process.cwd());
+    if (redirectFd !== null) closeSync(redirectFd);
+    if (errFd !== null) closeSync(errFd);
+    showPrompt();
+    return;
+  }
+
+  if (command === "history") {
+    const text = formatHistory();
+    if (text) out(text);
     if (redirectFd !== null) closeSync(redirectFd);
     if (errFd !== null) closeSync(errFd);
     showPrompt();
