@@ -242,10 +242,15 @@ const jobs: Job[] = [];
 const historyList: string[] = [];
 
 // Render the `history` listing: right-aligned entry numbers of width five,
-// two spaces, then the command text.
-function formatHistory(): string {
+// two spaces, then the command text. An optional limit shows only the last
+// `limit` entries while keeping their original numbering (bash semantics).
+function formatHistory(limit?: number): string {
+  const count =
+    limit !== undefined && limit > 0 ? Math.min(limit, historyList.length) : historyList.length;
+  const start = historyList.length - count;
   return historyList
-    .map((cmd, index) => `${String(index + 1).padStart(5, " ")}  ${cmd}`)
+    .slice(start)
+    .map((cmd, offset) => `${String(start + offset + 1).padStart(5, " ")}  ${cmd}`)
     .join("\n");
 }
 
@@ -324,6 +329,13 @@ function formatEchoOutput(cmdArgs: string[]): string {
   return text + (newline ? "\n" : "");
 }
 
+// Parse the optional numeric argument of `history <n>`; returns undefined
+// when absent or not a plain positive integer.
+function parseHistoryLimit(cmdArgs: string[]): number | undefined {
+  if (cmdArgs.length === 0 || !/^\d+$/.test(cmdArgs[0])) return undefined;
+  return parseInt(cmdArgs[0], 10);
+}
+
 // Compute what a built-in prints when it runs as a pipeline member. Built-ins
 // here never read stdin, so only their output matters; side effects (cd,
 // jobs, complete, exit) are skipped, matching bash's subshell semantics.
@@ -331,7 +343,7 @@ function builtinPipelineOutput(name: string, cmdArgs: string[]): string {
   if (name === "echo") return formatEchoOutput(cmdArgs);
   if (name === "pwd") return `${process.cwd()}\n`;
   if (name === "history") {
-    const text = formatHistory();
+    const text = formatHistory(parseHistoryLimit(cmdArgs));
     return text.length > 0 ? `${text}\n` : "";
   }
   if (name === "type") {
@@ -772,7 +784,7 @@ rl.on("line", (input: string) => {
   }
 
   if (command === "history") {
-    const text = formatHistory();
+    const text = formatHistory(parseHistoryLimit(cmdArgs));
     if (text) out(text);
     if (redirectFd !== null) closeSync(redirectFd);
     if (errFd !== null) closeSync(errFd);
