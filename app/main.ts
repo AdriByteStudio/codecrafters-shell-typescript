@@ -986,5 +986,15 @@ rl.on("line", (input: string) => {
 });
 
 rl.on("close", () => {
+  // Persist the in-memory history (including the `exit` line itself) to
+  // $HISTFILE on shutdown, one command per line with a trailing newline.
+  const histFile = process.env.HISTFILE;
+  if (histFile) {
+    try {
+      writeFileSync(histFile, historyList.map((cmd) => `${cmd}\n`).join(""));
+    } catch {
+      // Unwritable history file: nothing to save.
+    }
+  }
   process.exit(0);
 });
